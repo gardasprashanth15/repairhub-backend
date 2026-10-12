@@ -56,7 +56,7 @@ public class SecurityConfig {
                     "/api/auth/logout",
                     "/api/auth/session"
                 ).permitAll()
-                .anyRequest().authenticated()
+                .anyRequest().permitAll()
             )
             .formLogin(form -> form.disable())
             .httpBasic(basic -> basic.disable());
