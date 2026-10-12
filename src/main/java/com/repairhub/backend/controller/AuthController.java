@@ -1,8 +1,7 @@
-```java
+
 package com.repairhub.backend.controller;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -13,7 +12,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,7 +24,6 @@ import com.repairhub.backend.entity.Admin;
 import com.repairhub.backend.repository.AdminRepository;
 
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
 @RestController
@@ -41,15 +39,12 @@ public class AuthController {
 
     private final AdminRepository adminRepository;
     private final PasswordEncoder passwordEncoder;
-    private final SecurityContextRepository securityContextRepository;
 
     public AuthController(
             AdminRepository adminRepository,
-            PasswordEncoder passwordEncoder,
-            SecurityContextRepository securityContextRepository) {
+            PasswordEncoder passwordEncoder) {
         this.adminRepository = adminRepository;
         this.passwordEncoder = passwordEncoder;
-        this.securityContextRepository = securityContextRepository;
     }
 
     private ResponseEntity<Map<String, Object>> response(
@@ -62,14 +57,15 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> login(
             @RequestBody LoginRequest request,
-            HttpServletRequest httpRequest,
-            HttpServletResponse httpResponse) {
+            HttpServletRequest httpRequest) {
 
         if (request.username == null || request.password == null
                 || request.username.isBlank()
                 || request.password.isBlank()) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Username/email and password are required.");
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Username/email and password are required."
+            );
         }
 
         String identifier = request.username.trim();
@@ -83,9 +79,12 @@ public class AuthController {
 
         if (foundAdmin.isEmpty()
                 || !passwordEncoder.matches(
-                    request.password, foundAdmin.get().getPassword())) {
-            return response(HttpStatus.UNAUTHORIZED,
-                    "Invalid username/email or password.");
+                    request.password,
+                    foundAdmin.get().getPassword())) {
+            return response(
+                HttpStatus.UNAUTHORIZED,
+                "Invalid username/email or password."
+            );
         }
 
         Admin admin = foundAdmin.get();
@@ -94,7 +93,7 @@ public class AuthController {
                 new UsernamePasswordAuthenticationToken(
                     admin.getUsername(),
                     null,
-                    List.of(
+                    java.util.List.of(
                         new org.springframework.security.core.authority
                             .SimpleGrantedAuthority("ROLE_ADMIN")
                     )
@@ -102,12 +101,16 @@ public class AuthController {
 
         SecurityContext context =
                 SecurityContextHolder.createEmptyContext();
+
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);
 
         HttpSession session = httpRequest.getSession(true);
-        securityContextRepository.saveContext(
-                context, httpRequest, httpResponse);
+        session.setAttribute(
+            HttpSessionSecurityContextRepository
+                .SPRING_SECURITY_CONTEXT_KEY,
+            context
+        );
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("message", "Login successful.");
@@ -123,8 +126,7 @@ public class AuthController {
 
         if (authentication == null
                 || !authentication.isAuthenticated()
-                || !(authentication.getPrincipal() instanceof String)
-                || "anonymousUser".equals(authentication.getPrincipal())) {
+                || !(authentication.getPrincipal() instanceof String)) {
             return response(HttpStatus.UNAUTHORIZED, "Not logged in.");
         }
 
@@ -137,69 +139,89 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<Map<String, Object>> logout(
-            HttpServletRequest request,
-            HttpServletResponse response) {
+            HttpServletRequest request) {
 
         SecurityContextHolder.clearContext();
 
         HttpSession session = request.getSession(false);
+
         if (session != null) {
             session.invalidate();
         }
 
-        return ResponseEntity.ok(
-                Map.of("message", "Logout successful."));
+        return response(HttpStatus.OK, "Logout successful.");
     }
 
+    // Only an authenticated admin can register another admin.
     @PostMapping("/register")
     public ResponseEntity<Map<String, Object>> register(
             @RequestBody RegisterRequest request) {
 
-        if (request.username == null || request.email == null
+        if (request.username == null
+                || request.email == null
                 || request.password == null
                 || request.username.isBlank()
                 || request.email.isBlank()
                 || request.password.isBlank()) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Username, email and password are required.");
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Username, email and password are required."
+            );
         }
 
         String username = request.username.trim();
         String email = request.email.trim().toLowerCase();
 
         if (username.length() < 3) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Username must contain at least 3 characters.");
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Username must contain at least 3 characters."
+            );
         }
 
         if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Enter a valid email address.");
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Enter a valid email address."
+            );
         }
 
         if (request.password.length() < 8) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Password must contain at least 8 characters.");
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Password must contain at least 8 characters."
+            );
         }
 
         if (adminRepository.findByUsername(username).isPresent()) {
-            return response(HttpStatus.CONFLICT,
-                    "Username already exists.");
+            return response(
+                HttpStatus.CONFLICT,
+                "Username already exists."
+            );
         }
 
         if (adminRepository.findByEmail(email).isPresent()) {
-            return response(HttpStatus.CONFLICT,
-                    "Email already exists.");
+            return response(
+                HttpStatus.CONFLICT,
+                "Email already exists."
+            );
         }
 
         Admin admin = new Admin(
-                username, email, passwordEncoder.encode(request.password));
+            username,
+            email,
+            passwordEncoder.encode(request.password)
+        );
+
         adminRepository.save(admin);
 
-        return response(HttpStatus.CREATED,
-                "Admin account registered successfully.");
+        return response(
+            HttpStatus.CREATED,
+            "Admin account registered successfully."
+        );
     }
 
+    // An authenticated admin must provide the current password.
     @PostMapping("/password")
     public ResponseEntity<Map<String, Object>> changePassword(
             @RequestBody ChangePasswordRequest request) {
@@ -209,51 +231,70 @@ public class AuthController {
 
         if (authentication == null
                 || !authentication.isAuthenticated()
-                || !(authentication.getPrincipal() instanceof String)
-                || "anonymousUser".equals(authentication.getPrincipal())) {
-            return response(HttpStatus.UNAUTHORIZED,
-                    "Please log in first.");
+                || !(authentication.getPrincipal() instanceof String)) {
+            return response(
+                HttpStatus.UNAUTHORIZED,
+                "Please log in first."
+            );
         }
 
-        if (request.currentPassword == null || request.newPassword == null
+        if (request.currentPassword == null
+                || request.newPassword == null
                 || request.currentPassword.isBlank()
                 || request.newPassword.isBlank()) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Current password and new password are required.");
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Current password and new password are required."
+            );
         }
 
         if (request.newPassword.length() < 8) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "New password must contain at least 8 characters.");
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "New password must contain at least 8 characters."
+            );
         }
 
+        String username = authentication.getName();
+
         Optional<Admin> foundAdmin =
-                adminRepository.findByUsername(authentication.getName());
+                adminRepository.findByUsername(username);
 
         if (foundAdmin.isEmpty()) {
-            return response(HttpStatus.NOT_FOUND,
-                    "Admin account not found.");
+            return response(
+                HttpStatus.NOT_FOUND,
+                "Admin account not found."
+            );
         }
 
         Admin admin = foundAdmin.get();
+        
 
         if (!passwordEncoder.matches(
-                request.currentPassword, admin.getPassword())) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Current password is incorrect.");
+                request.currentPassword,
+                admin.getPassword())) {
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Current password is incorrect."
+            );
         }
 
         if (passwordEncoder.matches(
-                request.newPassword, admin.getPassword())) {
-            return response(HttpStatus.BAD_REQUEST,
-                    "Choose a password different from your current password.");
+                request.newPassword,
+                admin.getPassword())) {
+            return response(
+                HttpStatus.BAD_REQUEST,
+                "Choose a password different from your current password."
+            );
         }
 
         admin.setPassword(passwordEncoder.encode(request.newPassword));
         adminRepository.save(admin);
 
-        return response(HttpStatus.OK,
-                "Password changed successfully. Please log in again.");
+        return response(
+            HttpStatus.OK,
+            "Password changed successfully. Please log in again."
+        );
     }
 
     public static class LoginRequest {
@@ -272,4 +313,3 @@ public class AuthController {
         public String newPassword;
     }
 }
-```
